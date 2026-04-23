@@ -1,0 +1,55 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": ["typescript", "vitest"],
+  "jsPlugins": ["./lint-plugins/you-lint-not-pass-policy.js"],
+  "ignorePatterns": ["node_modules/**", ".opencode/**", ".claude/**", "lint-plugins/**", "dist/**"],
+  "categories": {
+    "correctness": "error",
+    "suspicious": "error",
+    "pedantic": "error",
+    "perf": "error"
+  },
+  "options": {
+    "denyWarnings": true
+  },
+  "rules": {
+    "typescript/explicit-function-return-type": "error",
+    "typescript/explicit-module-boundary-types": "error",
+    "typescript/no-dynamic-delete": "error",
+    "typescript/no-empty-object-type": "error",
+    "typescript/no-explicit-any": "error",
+    "typescript/no-invalid-void-type": "error",
+    "typescript/no-namespace": "error",
+    "typescript/no-require-imports": "error",
+    "typescript/no-var-requires": "error",
+    "typescript/no-wrapper-object-types": "error",
+    "typescript/non-nullable-type-assertion-style": "error",
+    "typescript/prefer-literal-enum-member": "error",
+    "typescript/use-unknown-in-catch-callback-variable": "error",
+    "eslint/no-empty": "error",
+    "eslint/no-empty-function": "error",
+    "eslint/no-param-reassign": "error",
+    "import/extensions": ["error", "always", { "ignorePackages": true }],
+    "node/no-path-concat": "error",
+    "promise/catch-or-return": "error",
+    "unicorn/no-abusive-eslint-disable": "error",
+    "you-lint-not-pass-policy/no-inline-suppression-comments": "error"
+  },
+  "overrides": [
+    {
+      "files": ["src/**/*.mjs"],
+      "rules": {
+        "max-lines": "off"
+      }
+    },
+    {
+      "files": ["tests/**/*.ts"],
+      "rules": {
+        "max-lines-per-function": "off",
+        "max-lines": "off",
+        "typescript/no-confusing-void-expression": "off",
+        "eslint/no-empty-function": "off"
+      }
+    }
+  ]
+}
