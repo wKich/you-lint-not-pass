@@ -10,7 +10,7 @@ A portable lint enforcement system that prevents AI agents from:
 ## Features
 
 - 🔒 **Blocks protected config edits**: Prevents modification of oxlint, ESLint, and Biome config files
-- 🚫 **Blocks suppression comments**: Prevents adding `eslint-disable`/`eslint-enable`, `oxlint-disable`/`oxlint-enable`, `biome-ignore`/`biome-ignore-all`/`biome-ignore-start`/`biome-ignore-end`, `@ts-ignore`, `@ts-nocheck` comments
+- 🚫 **Blocks suppression comments**: Prevents adding `eslint-disable`/`eslint-enable`, `oxlint-disable`/`oxlint-enable`, `biome-ignore`/`biome-ignore-all`/`biome-ignore-start`/`biome-ignore-end`, `@ts-ignore`, `@ts-expect-error`, `@ts-nocheck` comments
 - ✅ **Allows removal**: Permits removing existing suppression comments
 - 📝 **Smart parsing**: Uses TypeScript scanner to accurately detect comments (not string literals)
 - 🔧 **Multi-tool support**: Works with Claude, OpenCode, and can be adapted for other agents
@@ -146,6 +146,7 @@ setProtectedLintConfig(new Set(['.eslintrc.json', 'eslint.config.js']))
 - `oxlint-enable` / `oxlint-enable-next-line` / `oxlint-enable-line`
 - `biome-ignore` / `biome-ignore-all` / `biome-ignore-start` / `biome-ignore-end`
 - `@ts-ignore`
+- `@ts-expect-error`
 - `@ts-nocheck`
 
 ### Advanced Customization

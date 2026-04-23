@@ -36,6 +36,7 @@ const oxlintDisableDirective = ['oxlint', 'disable'].join('-')
 const oxlintEnableDirective = ['oxlint', 'enable'].join('-')
 const biomeIgnoreDirective = 'biome-ignore'
 const tsIgnoreDirective = ['@ts', 'ignore'].join('-')
+const tsExpectErrorDirective = ['@ts', 'expect-error'].join('-')
 const tsNoCheckDirective = ['@ts', 'nocheck'].join('-')
 
 let suppressionMatchers = [
@@ -62,6 +63,10 @@ let suppressionMatchers = [
   {
     label: tsIgnoreDirective,
     pattern: new RegExp(`${tsIgnoreDirective}\\b`, 'u'),
+  },
+  {
+    label: tsExpectErrorDirective,
+    pattern: new RegExp(`${tsExpectErrorDirective}\\b`, 'u'),
   },
   {
     label: tsNoCheckDirective,
