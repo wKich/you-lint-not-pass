@@ -70,23 +70,24 @@ cp .hooks/you-lint-not-pass/.claude/settings.json.example .claude/settings.json
 
 ### Step 3: Register the plugin — OpenCode
 
-Read `.opencode/config.json`. If it exists, **add** the plugin path to the existing `plugins` array. If not, copy the template.
+Create `.opencode/plugins/you-lint-not-pass-plugin.ts` that re-exports the plugin from the submodule:
 
-**Plugin path to add to `plugins` array:**
-
-```
-.hooks/you-lint-not-pass/opencode/you-lint-not-pass-plugin.ts
+```ts
+export { YouLintNotPassPlugin, default } from '../../.hooks/you-lint-not-pass/opencode/you-lint-not-pass-plugin.ts'
 ```
 
-> The plugin must be referenced from the submodule path (not copied), because it uses a relative import to `../src/enforce-write-policy.mjs`.
+Ensure `.opencode/package.json` includes the required dependencies (OpenCode runs `npm install` on startup):
 
-**If `.opencode/config.json` does not exist**, copy the template:
-
-```bash
-cp .hooks/you-lint-not-pass/.opencode/config.example.json .opencode/config.json
+```json
+{
+  "dependencies": {
+    "@opencode-ai/plugin": "^1.4.11",
+    "typescript": "^5.0.0"
+  }
+}
 ```
 
-**If it exists**, read it and append the plugin path above to the `plugins` array. Do not remove existing plugins.
+No config file changes needed — OpenCode auto-discovers plugins from `.opencode/plugins/`.
 
 ### Step 4: Verify
 
@@ -97,8 +98,7 @@ Ask your AI agent to add a suppression comment (e.g., `// @ts-ignore`) to any fi
 | Template | Purpose | Target |
 |----------|---------|--------|
 | `.claude/settings.json.example` | Claude Code hook config | `.claude/settings.json` |
-| `opencode/you-lint-not-pass-plugin.ts` | OpenCode plugin | Referenced from submodule (not copied) |
-| `.opencode/config.example.json` | OpenCode plugin config | `.opencode/config.json` |
+| `opencode/you-lint-not-pass-plugin.ts` | OpenCode plugin (re-export from submodule) | `.opencode/plugins/` |
 
 ## Configuration
 

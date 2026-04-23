@@ -1,6 +1,3 @@
-// OpenCode plugin for lint policy enforcement
-// Place this in your .opencode/plugins/ directory
-
 import type { Plugin } from '@opencode-ai/plugin'
 
 import { enforceWritePolicy } from '../src/enforce-write-policy.mjs'
