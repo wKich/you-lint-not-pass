@@ -13,6 +13,7 @@
     "typescript": "^5.0.0"
   },
   "devDependencies": {
+    "@opencode/plugin": "^2.0.12",
     "@types/bun": "latest",
     "@types/node": "^22.0.0",
     "oxlint": "^1.61.0"

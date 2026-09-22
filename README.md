@@ -68,7 +68,9 @@ cp .hooks/you-lint-not-pass/.claude/settings.json.example .claude/settings.json
 
 **If it exists**, read it and append the hook entry above to the `hooks.PreToolUse` array. Do not overwrite existing hooks.
 
-### Step 3: Register the plugin — OpenCode
+### Step 3: Register the plugin — OpenCode 2
+
+> **Note:** This plugin targets **OpenCode 2 only**. V1 plugin implementations do not run in V2 and vice versa — the plugin exposes no V1 entrypoint. If you are still on OpenCode 1, pin the previous release of `you-lint-not-pass`.
 
 Create `.opencode/plugins/you-lint-not-pass-plugin.ts` that re-exports the plugin from the submodule:
 
@@ -81,7 +83,7 @@ Ensure `.opencode/package.json` includes the required dependencies (OpenCode run
 ```json
 {
   "dependencies": {
-    "@opencode-ai/plugin": "^1.4.11",
+    "@opencode/plugin": "^2.0.12",
     "typescript": "^5.0.0"
   }
 }
@@ -98,7 +100,7 @@ Ask your AI agent to add a suppression comment (e.g., `// @ts-ignore`) to any fi
 | Template | Purpose | Target |
 |----------|---------|--------|
 | `.claude/settings.json.example` | Claude Code hook config | `.claude/settings.json` |
-| `opencode/you-lint-not-pass-plugin.ts` | OpenCode plugin (re-export from submodule) | `.opencode/plugins/` |
+| `opencode/you-lint-not-pass-plugin.ts` | OpenCode 2 plugin (re-export from submodule) | `.opencode/plugins/` |
 
 ## Configuration
 

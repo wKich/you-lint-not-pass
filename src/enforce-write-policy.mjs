@@ -5,8 +5,14 @@ import path from 'node:path'
 
 import * as ts from 'typescript'
 
-const EDIT_TOOLS = new Set(['write', 'edit', 'multiedit'])
+const EDIT_TOOLS = new Set(['write', 'edit', 'multiedit', 'patch', 'apply_patch'])
+const PATCH_TOOL_NAMES = new Set(['patch', 'apply_patch'])
 const COMMENTABLE_FILE_PATTERN = /\.(?:[cm]?[jt]s|[jt]sx)$/u
+
+const PATCH_BEGIN_MARKER = '*** Begin Patch'
+const PATCH_END_MARKER = '*** End Patch'
+const PATCH_SECTION_HEADER_PATTERN = /^\*\*\* (Add|Update|Delete) File:\s*(.+)$/u
+const PATCH_MOVE_PATTERN = /^\*\*\* Move to:\s*(.+)$/u
 
 const PROTECTED_LINT_CONFIGS = new Set([
   '.oxlintrc.json',
@@ -195,11 +201,15 @@ function getOldString(edit) {
  */
 function resolveToolName(toolName, toolInput) {
   if (typeof toolName === 'string' && EDIT_TOOLS.has(toolName)) {
-    return toolName
+    return PATCH_TOOL_NAMES.has(toolName) ? 'patch' : toolName
   }
 
   if (Array.isArray(toolInput.edits) || Array.isArray(toolInput.changes)) {
     return 'multiedit'
+  }
+
+  if (typeof toolInput.patchText === 'string') {
+    return 'patch'
   }
 
   if (typeof toolInput.content === 'string') {
@@ -331,6 +341,179 @@ function isProtectedLintConfig(absPath, cwd) {
 }
 
 /**
+ * @typedef {Object} PatchSection
+ * @property {'Add' | 'Update' | 'Delete'} type
+ * @property {string} path
+ * @property {string | null} movePath
+ * @property {string[]} addedLines
+ */
+
+/**
+ * Extract per-file sections from an OpenCode patch payload. When the
+ * Begin/End envelope is present only its interior is scanned; otherwise the
+ * whole payload is scanned as a fallback for header-only patches.
+ * @param {string} patchText
+ * @returns {PatchSection[]}
+ */
+export function parsePatchSections(patchText) {
+  const lines = patchText.split(/\r?\n/u)
+  const beginIndex = lines.findIndex((line) => line.trim() === PATCH_BEGIN_MARKER)
+  const endIndex = lines.findIndex((line) => line.trim() === PATCH_END_MARKER)
+  const region =
+    beginIndex !== -1 && endIndex !== -1 && beginIndex < endIndex
+      ? lines.slice(beginIndex + 1, endIndex)
+      : lines
+
+  const sections = []
+  /** @type {PatchSection | null} */
+  let current = null
+
+  for (const line of region) {
+    const header = line.match(PATCH_SECTION_HEADER_PATTERN)
+    if (header !== null) {
+      current = {
+        type: header[1],
+        path: header[2].trim(),
+        movePath: null,
+        addedLines: [],
+      }
+      sections.push(current)
+      continue
+    }
+
+    const move = line.match(PATCH_MOVE_PATTERN)
+    if (move !== null && current !== null && current.type === 'Update') {
+      current.movePath = move[1].trim()
+      continue
+    }
+
+    if (current !== null && current.type !== 'Delete' && line.startsWith('+')) {
+      current.addedLines.push(line)
+    }
+  }
+
+  return sections
+}
+
+/**
+ * @param {PatchSection[]} sections
+ * @param {string} cwd
+ * @returns {Set<string>}
+ */
+function findProtectedPatchHits(sections, cwd) {
+  const hits = new Set()
+  for (const section of sections) {
+    for (const candidate of [section.path, section.movePath]) {
+      if (typeof candidate !== 'string') continue
+      const absPath = path.resolve(cwd, candidate)
+      if (isProtectedLintConfig(absPath, cwd)) {
+        hits.add(path.basename(absPath))
+      }
+    }
+  }
+  return hits
+}
+
+/**
+ * Scan `+`-prefixed added lines for suppression markers. Conservative by
+ * design: no content reconstruction, so additions can never be missed.
+ * @param {PatchSection[]} sections
+ * @param {string} cwd
+ * @returns {Map<string, Set<string>>}
+ */
+function findPatchSuppressionOffenders(sections, cwd) {
+  /** @type {Map<string, Set<string>>} */
+  const offenders = new Map()
+
+  for (const section of sections) {
+    const absPath = path.resolve(cwd, section.path)
+    const relPath = path.relative(cwd, absPath).replace(/\\/gu, '/')
+
+    for (const line of section.addedLines) {
+      for (const { label, pattern } of suppressionMatchers) {
+        if (!new RegExp(pattern.source, 'u').test(line)) continue
+        const labels = offenders.get(relPath) ?? new Set()
+        labels.add(label)
+        offenders.set(relPath, labels)
+      }
+    }
+  }
+
+  return offenders
+}
+
+/**
+ * @returns {BlockResult}
+ */
+function unverifiedPatchResult() {
+  return {
+    decision: 'block',
+    reason:
+      'Blocked a patch that could not be verified.\n\n' +
+      'The patch payload had no recognizable file sections. Reformat it with ' +
+      '`*** Begin Patch` / `*** End Patch` and per-file headers, or use the write/edit tools instead.',
+  }
+}
+
+/**
+ * @param {Record<string, unknown>} toolInput
+ * @param {string} cwd
+ * @returns {BlockResult | null}
+ */
+function enforcePatchPolicy(toolInput, cwd) {
+  const patchText = toolInput.patchText
+  if (typeof patchText !== 'string') return unverifiedPatchResult()
+
+  const sections = parsePatchSections(patchText)
+  if (sections.length === 0) return unverifiedPatchResult()
+
+  const protectedHits = findProtectedPatchHits(sections, cwd)
+  if (protectedHits.size > 0) {
+    const names = [...protectedHits].map((name) => `\`${name}\``).join(', ')
+    return {
+      decision: 'block',
+      reason:
+        `Cannot modify ${names}.\n\n` +
+        'Repo-wide lint policy is protected by hooks. Fix the underlying code instead of loosening the rules.',
+    }
+  }
+
+  const offenders = findPatchSuppressionOffenders(sections, cwd)
+  if (offenders.size === 0) return null
+
+  const details = [...offenders]
+    .map(([relPath, labels]) => {
+      const names = [...labels].map((label) => `\`${label}\``).join(', ')
+      return `- \`${relPath}\`: ${names}`
+    })
+    .join('\n')
+
+  return {
+    decision: 'block',
+    reason:
+      'Cannot apply a patch that adds inline lint suppression comments.\n\n' +
+      `Offending files:\n${details}\n\n` +
+      'Fix the underlying issue instead of suppressing the rule.',
+  }
+}
+
+/**
+ * @param {string} absPath
+ * @returns {BlockResult}
+ */
+function protectedConfigBlockResult(absPath) {
+  const configName = protectedLintConfig instanceof Set
+    ? path.basename(absPath)
+    : protectedLintConfig
+  return {
+    decision: 'block',
+    reason:
+      `Cannot modify \`${configName}\`.\n\n` +
+      `Repo-wide lint policy is protected by hooks. Fix the underlying code instead of loosening the rules.`,
+  }
+}
+
+/**
  * @param {{ tool_name?: string, tool_input: Record<string, unknown> & { file_path?: string }, cwd: string }} ctx
  * @returns {BlockResult | null}
  */
@@ -340,22 +523,18 @@ export function enforceWritePolicy(ctx) {
     const resolvedToolName = resolveToolName(tool_name, tool_input)
     if (!resolvedToolName) return null
 
+    if (resolvedToolName === 'patch') {
+      return enforcePatchPolicy(tool_input, cwd)
+    }
+
     const filePath = tool_input.file_path
     if (typeof filePath !== 'string' || filePath.length === 0) return null
 
     const absPath = path.resolve(cwd, filePath)
-    const relPath = path.relative(cwd, absPath).replace(/\\/g, '/')
+    const relPath = path.relative(cwd, absPath).replace(/\\/gu, '/')
 
     if (isProtectedLintConfig(absPath, cwd)) {
-      const configName = protectedLintConfig instanceof Set
-        ? path.basename(absPath)
-        : protectedLintConfig
-      return {
-        decision: 'block',
-        reason:
-          `Cannot modify \`${configName}\`.\n\n` +
-          `Repo-wide lint policy is protected by hooks. Fix the underlying code instead of loosening the rules.`,
-      }
+      return protectedConfigBlockResult(absPath)
     }
 
     if (!isCommentableFile(absPath)) return null

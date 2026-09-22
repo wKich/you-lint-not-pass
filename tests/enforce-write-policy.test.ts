@@ -5,6 +5,7 @@ import path from 'node:path'
 
 import {
   enforceWritePolicy,
+  parsePatchSections,
   PROTECTED_LINT_CONFIGS,
   setProtectedLintConfig,
 } from '../src/enforce-write-policy.mjs'
@@ -455,6 +456,240 @@ describe('enforceWritePolicy', () => {
 
       expect(result?.decision).toBe('block')
       expect(result?.reason).toContain(eslintDisable)
+    })
+  })
+
+  describe('patch tool blocking', () => {
+    const buildPatch = (bodyLines: string[]): string =>
+      ['*** Begin Patch', ...bodyLines, '*** End Patch'].join('\n')
+
+    const patchCtx = (
+      patchText: string,
+      toolName?: string,
+    ): {
+      cwd: string
+      tool_input: Record<string, unknown>
+      tool_name?: string
+    } => ({
+      cwd: tempDir,
+      tool_input: { patchText },
+      ...(toolName === undefined ? {} : { tool_name: toolName }),
+    })
+
+    describe('payload parsing', () => {
+      test('extracts sections, paths, and added lines from a sample patch', () => {
+        const sections = parsePatchSections(
+          buildPatch([
+            '*** Add File: src/new.ts',
+            '+export const x = 1',
+            '*** Update File: src/old.ts',
+            '@@',
+            '-console.log(a)',
+            '+console.log(b)',
+            ' unchanged()',
+            '*** Delete File: src/gone.ts',
+          ]),
+        )
+
+        expect(sections).toHaveLength(3)
+        expect(sections[0]).toEqual({
+          type: 'Add',
+          path: 'src/new.ts',
+          movePath: null,
+          addedLines: ['+export const x = 1'],
+        })
+        expect(sections[1]).toEqual({
+          type: 'Update',
+          path: 'src/old.ts',
+          movePath: null,
+          addedLines: ['+console.log(b)'],
+        })
+        expect(sections[2]).toEqual({
+          type: 'Delete',
+          path: 'src/gone.ts',
+          movePath: null,
+          addedLines: [],
+        })
+      })
+
+      test('extracts a Move to destination from update sections', () => {
+        const sections = parsePatchSections(
+          buildPatch(['*** Update File: src/a.ts', '*** Move to: src/b.ts', '+line']),
+        )
+
+        expect(sections).toHaveLength(1)
+        expect(sections[0]?.movePath).toBe('src/b.ts')
+      })
+
+      test('infers patch payloads when tool_name is omitted', () => {
+        const directive = makeLineComment(tsIgnore)
+        const result = enforceWritePolicy(
+          patchCtx(buildPatch(['*** Add File: src/example.ts', `+${directive}`])),
+        )
+
+        expect(result?.decision).toBe('block')
+        expect(result?.reason).toContain(tsIgnore)
+      })
+
+      test('routes the apply_patch tool name like patch', () => {
+        const directive = makeLineComment(tsIgnore)
+        const result = enforceWritePolicy(
+          patchCtx(
+            buildPatch(['*** Add File: src/example.ts', `+${directive}`]),
+            'apply_patch',
+          ),
+        )
+
+        expect(result?.decision).toBe('block')
+        expect(result?.reason).toContain(tsIgnore)
+      })
+    })
+
+    describe('protected config protection', () => {
+      test('blocks deleting a protected config via patch', () => {
+        const result = enforceWritePolicy(
+          patchCtx(buildPatch(['*** Delete File: .oxlintrc.json']), 'patch'),
+        )
+
+        expect(result?.decision).toBe('block')
+        expect(result?.reason).toContain('.oxlintrc.json')
+      })
+
+      test('blocks adding a protected config via patch', () => {
+        const result = enforceWritePolicy(
+          patchCtx(buildPatch(['*** Add File: eslint.config.js', '+module.exports = {}']), 'patch'),
+        )
+
+        expect(result?.decision).toBe('block')
+        expect(result?.reason).toContain('eslint.config.js')
+      })
+
+      test('blocks moving a file onto a protected config path', () => {
+        const result = enforceWritePolicy(
+          patchCtx(
+            buildPatch(['*** Update File: src/a.ts', '*** Move to: biome.json', '+line']),
+            'patch',
+          ),
+        )
+
+        expect(result?.decision).toBe('block')
+        expect(result?.reason).toContain('biome.json')
+      })
+
+      test('blocks renaming a protected config away', () => {
+        const result = enforceWritePolicy(
+          patchCtx(
+            buildPatch(['*** Update File: .eslintrc.json', '*** Move to: src/renamed.ts', '+line']),
+            'patch',
+          ),
+        )
+
+        expect(result?.decision).toBe('block')
+        expect(result?.reason).toContain('.eslintrc.json')
+      })
+
+      test('allows patches that do not touch protected configs', () => {
+        const result = enforceWritePolicy(
+          patchCtx(buildPatch(['*** Add File: docs/example.md', '+Some notes']), 'patch'),
+        )
+
+        expect(result).toBeNull()
+      })
+    })
+
+    describe('suppression scanning of added lines', () => {
+      test('blocks a patch whose added line contains a suppression marker', () => {
+        const directive = makeLineComment(eslintDisable, '-next-line no-console')
+        const result = enforceWritePolicy(
+          patchCtx(buildPatch(['*** Add File: src/a.ts', `+${directive}`]), 'patch'),
+        )
+
+        expect(result?.decision).toBe('block')
+        expect(result?.reason).toContain('src/a.ts')
+        expect(result?.reason).toContain(eslintDisable)
+      })
+
+      test('names every offending file in one denial', () => {
+        const directive = makeLineComment(tsIgnore)
+        const result = enforceWritePolicy(
+          patchCtx(
+            buildPatch([
+              '*** Add File: src/one.ts',
+              `+${directive}`,
+              '*** Add File: src/two.ts',
+              `+${directive}`,
+            ]),
+            'patch',
+          ),
+        )
+
+        expect(result?.decision).toBe('block')
+        expect(result?.reason).toContain('src/one.ts')
+        expect(result?.reason).toContain('src/two.ts')
+      })
+
+      test('does not flag markers on context or removal lines', () => {
+        const directive = makeLineComment(tsIgnore)
+        const result = enforceWritePolicy(
+          patchCtx(
+            buildPatch([
+              '*** Update File: src/a.ts',
+              '@@',
+              `-${directive}`,
+              `${directive}`,
+              '+export const x = 1',
+            ]),
+            'patch',
+          ),
+        )
+
+        expect(result).toBeNull()
+      })
+
+      test('allows a clean patch', () => {
+        const result = enforceWritePolicy(
+          patchCtx(
+            buildPatch([
+              '*** Update File: src/a.ts',
+              '@@',
+              '-old()',
+              '+new()',
+              '*** Add File: src/b.ts',
+              '+export const b = 2',
+            ]),
+            'patch',
+          ),
+        )
+
+        expect(result).toBeNull()
+      })
+    })
+
+    describe('fail-closed handling', () => {
+      test('blocks a patch payload without recognizable file sections', () => {
+        const result = enforceWritePolicy(patchCtx('no markers, no headers\n+whatever', 'patch'))
+
+        expect(result?.decision).toBe('block')
+        expect(result?.reason).toContain('could not be verified')
+      })
+
+      test('blocks envelope markers containing no file sections', () => {
+        const result = enforceWritePolicy(patchCtx(buildPatch([]), 'patch'))
+
+        expect(result?.decision).toBe('block')
+        expect(result?.reason).toContain('could not be verified')
+      })
+
+      test('blocks a patch tool call with a missing payload', () => {
+        const result = enforceWritePolicy({
+          cwd: tempDir,
+          tool_name: 'patch',
+          tool_input: {},
+        })
+
+        expect(result?.decision).toBe('block')
+        expect(result?.reason).toContain('could not be verified')
+      })
     })
   })
 
