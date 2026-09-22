@@ -1,0 +1,42 @@
+schema: spec-driven
+
+# Project context: shown to AI when creating artifacts.
+context: |
+  Project: you-lint-not-pass, a portable lint enforcement system that blocks AI
+  coding agents from editing lint config files and from adding inline
+  suppression comments (eslint-disable, oxlint-disable, biome-ignore, @ts-*).
+  Stack: JavaScript/TypeScript (ESM, .mjs), Bun (test runner and scripts),
+  Node.js, oxlint. The typescript package provides the scanner used to detect
+  real comments rather than string literals.
+  Layout:
+    - src/ — core policy engine (enforce-write-policy.mjs) and entry point (index.mjs)
+    - claude/ — Claude Code PreToolUse hook
+    - opencode/ — OpenCode plugin
+    - lint-plugins/ — oxlint JS plugin enforcing the same policy at lint time
+    - tests/ — Bun test suite
+  Conventions: ESM imports with explicit file extensions, JSDoc type
+  annotations, conventional commits, and no inline lint/TS suppression comments
+  (the project's own policy forbids them).
+  Commands: bun test, bun run typecheck, bun run lint.
+
+# Per-artifact rules (optional)
+# Add custom rules for specific artifacts.
+# Example:
+#   rules:
+#     proposal:
+#       - Keep proposals under 500 words
+#       - Always include a "Non-goals" section
+#     tasks:
+#       - Break tasks into chunks of max 2 hours
+
+# Per-operation guidance (optional)
+# Add advisory guidance for how apply and archive work should be conducted.
+# This is separate from artifact rules above.
+# Example:
+#   operations:
+#     apply:
+#       guidance:
+#         - Keep test summaries concise
+#     archive:
+#       guidance:
+#         - Summarize the archive outcome before finishing
